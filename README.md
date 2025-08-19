@@ -7,7 +7,7 @@ It also studies whether detectors correctly identify AI or human-generated essay
 
 <br>
 This project is mainly a way for me, Michael Song, to explore and use modern R packages in the tidyverse, such as dplyr, ggplot2, readr, and purrr. 
-It uses data from a 2023 issue of [Tidy Tuesday](https://github.com/rfordatascience/tidytuesday), a weekly data analysis community project. 
+It uses data from a 2023 issue of Tidy Tuesday, a weekly data analysis community project. 
 
 <br>
-You can check out the knitted analysis [here!](gpt.nb.html)
+You can check out the knitted analysis at gpt.nb.html!

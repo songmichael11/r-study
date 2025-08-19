@@ -1,0 +1,137 @@
+---
+title: "Non-native English essays disproportionately flagged as AI"
+output:
+  html_document:
+    df_print: paged
+  html_notebook: default
+  pdf_document: default
+---
+Author: Michael Song 
+
+This notebook analyzes whether essays written by non-native English speakers are more likely to be falsely flagged as AI compared to native English speakers. Data for this analysis is taken from a 2023 edition of Tidy Tuesday, and is based off of a study done [here](https://www.cell.com/patterns/fulltext/S2666-3899(23)00130-7?_returnURL=https%3A%2F%2Flinkinghub.elsevier.com%2Fretrieve%2Fpii%2FS2666389923001307%3Fshowall%3Dtrue) 
+
+This study mainly serves as a way for me to learn some more modern R packages in the tidyverse, such as readr, dplyr, and ggplot2.
+
+```{r}
+library(readr)
+library(dplyr)
+library(ggplot2)
+library(purrr)
+```
+
+```{r}
+detectors <- readr::read_csv('https://raw.githubusercontent.com/rfordatascience/tidytuesday/main/data/2023/2023-07-18/detectors.csv')
+```
+We can see that each row in our data represents one essay and instance of a detector. We also see that our data has 10 unique categories for the name column, with "Real TOEFL" being the only one corresponding to non-native human-written essays. 
+ 
+```{r}
+print(detectors)
+
+print(detectors$name %>% unique() %>% length())
+print(detectors$name %>% unique())
+```
+
+We want to create a separate column/flag to denote whether an essay is ai, human (native), or human (non-native) for future analysis. We also want to create a flag for whether the detector flagged the essay correctly or incorrectly.
+
+```{r}
+detectors <- detectors %>%
+  mutate(
+    cat = case_when(
+      kind == "AI" ~ "fake",
+      native == "Yes" ~ "real (native)",
+      TRUE ~ "real (non-native)"),
+    right = case_when(kind == .pred_class ~ TRUE, TRUE ~ FALSE)
+  )
+```
+
+We can visualize the original categories and our aggregate cat column to see the spread of observations.
+```{r}
+ggplot(detectors, aes(x = name)) +
+  geom_bar(width=0.5) + 
+  theme(axis.text.x  = element_text(angle=45, size = 7))
+
+ggplot(detectors, aes(x = cat)) +
+  geom_bar(width=0.5) + 
+  theme(axis.text.x  = element_text(size = 20))
+```
+We can see from the above charts that most of the observations come from AI-generated data.
+
+## Analysis
+First, lets check the accuracy of our detectors without differentiating between native and non-native human essays
+```{r}
+accuracy <- group_by(detectors, detector) %>% summarise(accuracy = sum(right) / n())
+mean_accuracy <- mean(accuracy$accuracy)
+print(accuracy)
+print(mean_accuracy)
+```
+
+Our mean accuracy is only ~51%, with accuracy not differing too wildly between different detectors. This is barely better than guessing.
+
+Lets go ahead and compare the likelihood that a human (native) essay is flagged as AI compared to a human (non-native) essay
+
+```{r}
+human.native <- filter(detectors, cat == "real (native)")
+human.non.native <- filter(detectors, cat == "real (non-native)")
+```
+
+```{r}
+# getting fraction of native/non-native essays that are flagged as AI
+native.flagged <- human.native %>% summarize(flagged = 1 - sum(right) / n())
+non.native.flagged <- human.non.native %>% summarize(flagged = 1 - sum(right) / n())
+print(native.flagged %>% pull)
+print(non.native.flagged %>% pull)
+```
+We can see that the means seem to differ.
+
+To formally test whether these proportions significantly differ, we can do a two-proportion z test
+
+```{r}
+test.results <- prop.test(x = c(sum(!human.native$right), sum(!human.non.native$right)), n = c(nrow(human.native), nrow(human.non.native)))
+print(test.results)
+```
+With a p-value very much below 0.05, this is a statistically significant difference in the proportion of falsely flagged native vs. non-native essays.
+
+Let's check if this is also true for each individual detector, or if this only happens with some detectors.
+```{r}
+human.native.grouped <- group_by(human.native, detector) %>% summarise(x1 = (sum(!right)), n1 = n())
+human.non.native.grouped <- group_by(human.non.native, detector) %>% summarise(x2 = (sum(!right)), n2 = n())
+
+getP <- function(x1, n1, x2, n2, name) { # function that just returns the p value and detector name for each test
+  result <- prop.test(x = c(x1, x2), n = c(n1, n2))
+  return(c(name, result$p.value))
+}
+
+ps <- left_join(human.native.grouped, human.non.native.grouped, by = "detector") %>% mutate(p = pmap(list(x1, n2, x2, n2, detector), getP))
+
+ps <- ps$p
+ps <- as_tibble(do.call(rbind, ps))
+print(ps)
+```
+We can therefore see that while the detectors differ in p-values, they are all very much below 0.05, meaning that there is a significant difference in detection accuracy between native and non-native English speakers for all detectors.
+
+To wrap up, we can bookend our notebook with some analysis on the reliability of AI detectors in general.
+```{r}
+print(sum(!human.native$right) / nrow(human.native))
+```
+Interestingly, the incorrect detection rate for native speakers is only roughly 3.2%, making the detector seem somewhat accurate when only considering human written essays for native English speakers. On the other hand, detectors are still likely to incorrectly mark AI-written work as human work roughly 68.8% of the time, meaning that these detectors are basically worse than a coin-flip for detecting whether an AI-generated essay is actually AI or not.
+
+
+```{r}
+ai.only <- detectors %>% filter(kind == "AI")
+
+print(sum(!ai.only$right) / nrow(ai.only))
+```
+This can be graphed, too, to compare our three categories of AI, human (native), and human (non-native)
+```{r}
+final <- detectors %>% group_by(cat) %>% summarise(inaccuracy = (sum(!right) / n()))
+ggplot(final, aes(x = cat, y = inaccuracy)) +
+  geom_col(width=0.5) + 
+  theme(axis.text.x  = element_text(size = 20))
+```
+
+# Conclusions given this data:
+<ul>
+<li> In general, AI detectors are currently not reliable ways to detect AI-written work  
+<li> Across all detectors, human-written essays written by non-native English speakers are much more likely to be incorrectly flagged as AI-generated compared to human-written essays written by native English speakers
+<li> AI detectors are only accurate in identifying human-written essays written by native English speakers 
+</ul>
